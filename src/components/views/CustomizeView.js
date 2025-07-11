@@ -399,19 +399,15 @@ export class CustomizeView extends LitElement {
     `;
 
     static properties = {
-        selectedProfile: { type: String },
+        listeningEnabled: { type: Boolean },
         selectedLanguage: { type: String },
-        selectedScreenshotInterval: { type: String },
-        selectedImageQuality: { type: String },
         layoutMode: { type: String },
         keybinds: { type: Object },
         googleSearchEnabled: { type: Boolean },
         backgroundTransparency: { type: Number },
         fontSize: { type: Number },
-        onProfileChange: { type: Function },
+        onListeningChange: { type: Function },
         onLanguageChange: { type: Function },
-        onScreenshotIntervalChange: { type: Function },
-        onImageQualityChange: { type: Function },
         onLayoutModeChange: { type: Function },
         advancedMode: { type: Boolean },
         onAdvancedModeChange: { type: Function },
@@ -419,16 +415,12 @@ export class CustomizeView extends LitElement {
 
     constructor() {
         super();
-        this.selectedProfile = 'interview';
+        this.listeningEnabled = true;
         this.selectedLanguage = 'en-US';
-        this.selectedScreenshotInterval = '5';
-        this.selectedImageQuality = 'medium';
         this.layoutMode = 'normal';
         this.keybinds = this.getDefaultKeybinds();
-        this.onProfileChange = () => {};
+        this.onListeningChange = () => {};
         this.onLanguageChange = () => {};
-        this.onScreenshotIntervalChange = () => {};
-        this.onImageQualityChange = () => {};
         this.onLayoutModeChange = () => {};
         this.onAdvancedModeChange = () => {};
 
@@ -449,6 +441,7 @@ export class CustomizeView extends LitElement {
         this.loadAdvancedModeSettings();
         this.loadBackgroundTransparency();
         this.loadFontSize();
+        this.loadListeningSettings();
     }
 
     connectedCallback() {
@@ -459,40 +452,6 @@ export class CustomizeView extends LitElement {
         resizeLayout();
     }
 
-    getProfiles() {
-        return [
-            {
-                value: 'interview',
-                name: 'Job Interview',
-                description: 'Get help with answering interview questions',
-            },
-            {
-                value: 'sales',
-                name: 'Sales Call',
-                description: 'Assist with sales conversations and objection handling',
-            },
-            {
-                value: 'meeting',
-                name: 'Business Meeting',
-                description: 'Support for professional meetings and discussions',
-            },
-            {
-                value: 'presentation',
-                name: 'Presentation',
-                description: 'Help with presentations and public speaking',
-            },
-            {
-                value: 'negotiation',
-                name: 'Negotiation',
-                description: 'Guidance for business negotiations and deals',
-            },
-            {
-                value: 'exam',
-                name: 'Exam Assistant',
-                description: 'Academic assistance for test-taking and exam questions',
-            },
-        ];
-    }
 
     getLanguages() {
         return [
@@ -529,22 +488,7 @@ export class CustomizeView extends LitElement {
         ];
     }
 
-    getProfileNames() {
-        return {
-            interview: 'Job Interview',
-            sales: 'Sales Call',
-            meeting: 'Business Meeting',
-            presentation: 'Presentation',
-            negotiation: 'Negotiation',
-            exam: 'Exam Assistant',
-        };
-    }
 
-    handleProfileSelect(e) {
-        this.selectedProfile = e.target.value;
-        localStorage.setItem('selectedProfile', this.selectedProfile);
-        this.onProfileChange(this.selectedProfile);
-    }
 
     handleLanguageSelect(e) {
         this.selectedLanguage = e.target.value;
@@ -552,15 +496,18 @@ export class CustomizeView extends LitElement {
         this.onLanguageChange(this.selectedLanguage);
     }
 
-    handleScreenshotIntervalSelect(e) {
-        this.selectedScreenshotInterval = e.target.value;
-        localStorage.setItem('selectedScreenshotInterval', this.selectedScreenshotInterval);
-        this.onScreenshotIntervalChange(this.selectedScreenshotInterval);
+    loadListeningSettings() {
+        const listeningEnabled = localStorage.getItem('listeningEnabled');
+        if (listeningEnabled !== null) {
+            this.listeningEnabled = listeningEnabled === 'true';
+        }
     }
 
-    handleImageQualitySelect(e) {
-        this.selectedImageQuality = e.target.value;
-        this.onImageQualityChange(e.target.value);
+    handleListeningChange(e) {
+        this.listeningEnabled = e.target.checked;
+        localStorage.setItem('listeningEnabled', this.listeningEnabled.toString());
+        this.onListeningChange(this.listeningEnabled);
+        this.requestUpdate();
     }
 
     handleLayoutModeSelect(e) {
@@ -857,58 +804,11 @@ export class CustomizeView extends LitElement {
     }
 
     render() {
-        const profiles = this.getProfiles();
         const languages = this.getLanguages();
-        const profileNames = this.getProfileNames();
-        const currentProfile = profiles.find(p => p.value === this.selectedProfile);
         const currentLanguage = languages.find(l => l.value === this.selectedLanguage);
 
         return html`
             <div class="settings-container">
-                <!-- Profile & Behavior Section -->
-                <div class="settings-section">
-                    <div class="section-title">
-                        <span>AI Profile & Behavior</span>
-                    </div>
-
-                    <div class="form-grid">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label">
-                                    Profile Type
-                                    <span class="current-selection">${currentProfile?.name || 'Unknown'}</span>
-                                </label>
-                                <select class="form-control" .value=${this.selectedProfile} @change=${this.handleProfileSelect}>
-                                    ${profiles.map(
-                                        profile => html`
-                                            <option value=${profile.value} ?selected=${this.selectedProfile === profile.value}>
-                                                ${profile.name}
-                                            </option>
-                                        `
-                                    )}
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="form-group full-width">
-                            <label class="form-label">Custom AI Instructions</label>
-                            <textarea
-                                class="form-control"
-                                placeholder="Add specific instructions for how you want the AI to behave during ${
-                                    profileNames[this.selectedProfile] || 'this interaction'
-                                }..."
-                                .value=${localStorage.getItem('customPrompt') || ''}
-                                rows="4"
-                                @input=${this.handleCustomPromptInput}
-                            ></textarea>
-                            <div class="form-description">
-                                Personalize the AI's behavior with specific instructions that will be added to the
-                                ${profileNames[this.selectedProfile] || 'selected profile'} base prompts
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Language & Audio Section -->
                 <div class="settings-section">
                     <div class="section-title">
@@ -916,6 +816,20 @@ export class CustomizeView extends LitElement {
                     </div>
 
                     <div class="form-grid">
+                        <div class="checkbox-group">
+                            <input
+                                type="checkbox"
+                                class="checkbox-input"
+                                id="listening-enabled"
+                                .checked=${this.listeningEnabled}
+                                @change=${this.handleListeningChange}
+                            />
+                            <label for="listening-enabled" class="checkbox-label"> Enable Microphone Listening </label>
+                        </div>
+                        <div class="form-description" style="margin-left: 24px; margin-top: -8px;">
+                            Allow the app to listen to your microphone for questions.
+                        </div>
+
                         <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label">
@@ -933,6 +847,26 @@ export class CustomizeView extends LitElement {
                                 </select>
                                 <div class="form-description">Language for speech recognition and AI responses</div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Custom Prompt Section -->
+                <div class="settings-section">
+                    <div class="section-title">
+                        <span>Custom Prompt</span>
+                    </div>
+                    <div class="form-group full-width">
+                        <label class="form-label">Custom Prompt</label>
+                        <textarea
+                            class="form-control"
+                            placeholder="Enter your custom prompt here..."
+                            .value=${localStorage.getItem('customPrompt') || 'Analyse my screen and answer the question if you see it'}
+                            rows="3"
+                            @input=${this.handleCustomPromptInput}
+                        ></textarea>
+                        <div class="form-description">
+                            This prompt will be sent to the AI when you use the "Send Custom Prompt" shortcut (Ctrl+Shift+K or Cmd+Shift+K).
                         </div>
                     </div>
                 </div>
@@ -1018,62 +952,6 @@ export class CustomizeView extends LitElement {
                     </div>
                 </div>
 
-                <!-- Screen Capture Section -->
-                <div class="settings-section">
-                    <div class="section-title">
-                        <span>Screen Capture Settings</span>
-                    </div>
-
-                    <div class="form-grid">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label">
-                                    Capture Interval
-                                    <span class="current-selection"
-                                        >${this.selectedScreenshotInterval === 'manual' ? 'Manual' : this.selectedScreenshotInterval + 's'}</span
-                                    >
-                                </label>
-                                <select class="form-control" .value=${this.selectedScreenshotInterval} @change=${this.handleScreenshotIntervalSelect}>
-                                    <option value="manual" ?selected=${this.selectedScreenshotInterval === 'manual'}>Manual (On demand)</option>
-                                    <option value="1" ?selected=${this.selectedScreenshotInterval === '1'}>Every 1 second</option>
-                                    <option value="2" ?selected=${this.selectedScreenshotInterval === '2'}>Every 2 seconds</option>
-                                    <option value="5" ?selected=${this.selectedScreenshotInterval === '5'}>Every 5 seconds</option>
-                                    <option value="10" ?selected=${this.selectedScreenshotInterval === '10'}>Every 10 seconds</option>
-                                </select>
-                                <div class="form-description">
-                                    ${
-                                        this.selectedScreenshotInterval === 'manual'
-                                            ? 'Screenshots will only be taken when you use the "Ask Next Step" shortcut'
-                                            : 'Automatic screenshots will be taken at the specified interval'
-                                    }
-                                </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">
-                                    Image Quality
-                                    <span class="current-selection"
-                                        >${this.selectedImageQuality.charAt(0).toUpperCase() + this.selectedImageQuality.slice(1)}</span
-                                    >
-                                </label>
-                                <select class="form-control" .value=${this.selectedImageQuality} @change=${this.handleImageQualitySelect}>
-                                    <option value="high" ?selected=${this.selectedImageQuality === 'high'}>High Quality</option>
-                                    <option value="medium" ?selected=${this.selectedImageQuality === 'medium'}>Medium Quality</option>
-                                    <option value="low" ?selected=${this.selectedImageQuality === 'low'}>Low Quality</option>
-                                </select>
-                                <div class="form-description">
-                                    ${
-                                        this.selectedImageQuality === 'high'
-                                            ? 'Best quality, uses more tokens'
-                                            : this.selectedImageQuality === 'medium'
-                                              ? 'Balanced quality and token usage'
-                                              : 'Lower quality, uses fewer tokens'
-                                    }
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
                 <!-- Keyboard Shortcuts Section -->
                 <div class="settings-section">

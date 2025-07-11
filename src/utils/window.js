@@ -137,6 +137,7 @@ function getDefaultKeybinds() {
         moveRight: isMac ? 'Alt+Right' : 'Ctrl+Right',
         toggleVisibility: isMac ? 'Cmd+\\' : 'Ctrl+\\',
         toggleClickThrough: isMac ? 'Cmd+M' : 'Ctrl+M',
+        sendCustomPrompt: isMac ? 'Cmd+Shift+K' : 'Ctrl+Shift+K',
         nextStep: isMac ? 'Cmd+Enter' : 'Ctrl+Enter',
         previousResponse: isMac ? 'Cmd+[' : 'Ctrl+[',
         nextResponse: isMac ? 'Cmd+]' : 'Ctrl+]',
@@ -303,9 +304,48 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, geminiSessi
             console.error(`Failed to register scrollDown (${keybinds.scrollDown}):`, error);
         }
     }
+
+    // Register send custom prompt shortcut
+    if (keybinds.sendCustomPrompt) {
+        try {
+            globalShortcut.register(keybinds.sendCustomPrompt, () => {
+                console.log('Send custom prompt shortcut triggered');
+                sendToRenderer('send-custom-prompt');
+            });
+            console.log(`Registered sendCustomPrompt: ${keybinds.sendCustomPrompt}`);
+        } catch (error) {
+            console.error(`Failed to register sendCustomPrompt (${keybinds.sendCustomPrompt}):`, error);
+        }
+    }
+}
+
+async function startScreenCapture(mainWindow) {
+    const { desktopCapturer } = require('electron');
+    try {
+        const sources = await desktopCapturer.getSources({ types: ['screen'] });
+        const primarySource = sources.find(source => source.display_id === screen.getPrimaryDisplay().id.toString());
+
+        if (primarySource) {
+            mainWindow.webContents.send('set-screen-source', primarySource.id);
+        } else {
+            // Fallback to the first available screen if primary is not found
+            if (sources.length > 0) {
+                mainWindow.webContents.send('set-screen-source', sources[0].id);
+            } else {
+                console.error('No screen sources found.');
+            }
+        }
+    } catch (e) {
+        console.error('Error capturing screen:', e);
+    }
 }
 
 function setupWindowIpcHandlers(mainWindow, sendToRenderer, geminiSessionRef) {
+    ipcMain.handle('start-screen-capture', async (event) => {
+        await startScreenCapture(mainWindow);
+        return { success: true };
+    });
+
     ipcMain.on('view-changed', (event, view) => {
         if (view !== 'assistant' && !mainWindow.isDestroyed()) {
             mainWindow.setIgnoreMouseEvents(false);

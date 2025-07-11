@@ -255,7 +255,7 @@ export class AssistantView extends LitElement {
     static properties = {
         responses: { type: Array },
         currentResponseIndex: { type: Number },
-        selectedProfile: { type: String },
+        listeningEnabled: { type: Boolean },
         onSendText: { type: Function },
     };
 
@@ -263,26 +263,21 @@ export class AssistantView extends LitElement {
         super();
         this.responses = [];
         this.currentResponseIndex = -1;
-        this.selectedProfile = 'interview';
+        this.listeningEnabled = true;
         this.onSendText = () => {};
     }
 
-    getProfileNames() {
-        return {
-            interview: 'Job Interview',
-            sales: 'Sales Call',
-            meeting: 'Business Meeting',
-            presentation: 'Presentation',
-            negotiation: 'Negotiation',
-            exam: 'Exam Assistant',
-        };
-    }
 
     getCurrentResponse() {
-        const profileNames = this.getProfileNames();
-        return this.responses.length > 0 && this.currentResponseIndex >= 0
-            ? this.responses[this.currentResponseIndex]
-            : `Hey, Im listening to your ${profileNames[this.selectedProfile] || 'session'}?`;
+        if (this.responses.length > 0 && this.currentResponseIndex >= 0) {
+            return this.responses[this.currentResponseIndex];
+        }
+        let message = this.listeningEnabled
+            ? 'Listening for questions...'
+            : 'Analyzing screen... Type to ask questions.';
+        
+        message += '<br><br><small>Press Ctrl+Shift+K (or Cmd+Shift+K on Mac) to send your custom prompt.</small>';
+        return message;
     }
 
     renderMarkdown(content) {

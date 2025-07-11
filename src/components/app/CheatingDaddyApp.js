@@ -108,12 +108,10 @@ export class CheatingDaddyApp extends LitElement {
         startTime: { type: Number },
         isRecording: { type: Boolean },
         sessionActive: { type: Boolean },
-        selectedProfile: { type: String },
+        listeningEnabled: { type: Boolean },
         selectedLanguage: { type: String },
         responses: { type: Array },
         currentResponseIndex: { type: Number },
-        selectedScreenshotInterval: { type: String },
-        selectedImageQuality: { type: String },
         layoutMode: { type: String },
         advancedMode: { type: Boolean },
         _viewInstances: { type: Object, state: true },
@@ -127,16 +125,17 @@ export class CheatingDaddyApp extends LitElement {
         this.startTime = null;
         this.isRecording = false;
         this.sessionActive = false;
-        this.selectedProfile = localStorage.getItem('selectedProfile') || 'interview';
+        this.listeningEnabled = localStorage.getItem('listeningEnabled') === 'true';
         this.selectedLanguage = localStorage.getItem('selectedLanguage') || 'en-US';
-        this.selectedScreenshotInterval = localStorage.getItem('selectedScreenshotInterval') || '5';
-        this.selectedImageQuality = localStorage.getItem('selectedImageQuality') || 'medium';
         this.layoutMode = localStorage.getItem('layoutMode') || 'normal';
         this.advancedMode = localStorage.getItem('advancedMode') === 'true';
         this.responses = [];
         this.currentResponseIndex = -1;
         this._viewInstances = new Map();
         this._isClickThrough = false;
+        this.mediaRecorder = null;
+        this.mediaStream = null;
+        this.screenSourceId = null;
 
         // Apply layout mode to document root
         this.updateLayoutMode();
@@ -157,6 +156,13 @@ export class CheatingDaddyApp extends LitElement {
             ipcRenderer.on('click-through-toggled', (_, isEnabled) => {
                 this._isClickThrough = isEnabled;
             });
+            ipcRenderer.on('set-screen-source', async (_, sourceId) => {
+                this.screenSourceId = sourceId;
+                await this.startScreenCapture();
+            });
+            ipcRenderer.on('send-custom-prompt', () => {
+                this.sendCustomPrompt();
+            });
         }
     }
 
@@ -167,6 +173,8 @@ export class CheatingDaddyApp extends LitElement {
             ipcRenderer.removeAllListeners('update-response');
             ipcRenderer.removeAllListeners('update-status');
             ipcRenderer.removeAllListeners('click-through-toggled');
+            ipcRenderer.removeAllListeners('set-screen-source');
+            ipcRenderer.removeAllListeners('send-custom-prompt');
         }
     }
 
@@ -212,7 +220,7 @@ export class CheatingDaddyApp extends LitElement {
         if (this.currentView === 'customize' || this.currentView === 'help' || this.currentView === 'history') {
             this.currentView = 'main';
         } else if (this.currentView === 'assistant') {
-            cheddar.stopCapture();
+            this.stopRecording();
 
             // Close the session
             if (window.require) {
@@ -251,9 +259,11 @@ export class CheatingDaddyApp extends LitElement {
             return;
         }
 
-        await cheddar.initializeGemini(this.selectedProfile, this.selectedLanguage);
-        // Pass the screenshot interval as string (including 'manual' option)
-        cheddar.startCapture(this.selectedScreenshotInterval, this.selectedImageQuality);
+        await cheddar.initializeGemini(this.selectedLanguage);
+        if (window.require) {
+            const { ipcRenderer } = window.require('electron');
+            await ipcRenderer.invoke('start-screen-capture');
+        }
         this.responses = [];
         this.currentResponseIndex = -1;
         this.startTime = Date.now();
@@ -268,8 +278,8 @@ export class CheatingDaddyApp extends LitElement {
     }
 
     // Customize view event handlers
-    handleProfileChange(profile) {
-        this.selectedProfile = profile;
+    handleListeningChange(listeningEnabled) {
+        this.listeningEnabled = listeningEnabled;
     }
 
     handleLanguageChange(language) {
@@ -290,9 +300,113 @@ export class CheatingDaddyApp extends LitElement {
         localStorage.setItem('advancedMode', advancedMode.toString());
     }
 
+    async sendCustomPrompt() {
+        const customPrompt = localStorage.getItem('customPrompt') || 'Analyse my screen and answer the question if you see it';
+        await this.handleSendText(customPrompt);
+    }
+
     handleBackClick() {
         this.currentView = 'main';
         this.requestUpdate();
+    }
+
+    async startScreenCapture() {
+        if (!this.screenSourceId) {
+            console.error('Screen source ID not set.');
+            return;
+        }
+
+        try {
+            this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    mandatory: {
+                        chromeMediaSource: 'desktop',
+                        chromeMediaSourceId: this.screenSourceId,
+                        minWidth: 1280,
+                        maxWidth: 1280,
+                        minHeight: 720,
+                        maxHeight: 720,
+                    },
+                },
+            });
+
+            if (this.listeningEnabled) {
+                const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioStream.getAudioTracks().forEach(track => this.mediaStream.addTrack(track));
+            }
+
+            this.startRecording();
+        } catch (e) {
+            console.error('Error starting screen capture:', e);
+        }
+    }
+
+    startRecording() {
+        if (!this.mediaStream) {
+            console.error('Media stream not available.');
+            return;
+        }
+
+        const audioContext = new AudioContext({ sampleRate: 16000 });
+        const source = audioContext.createMediaStreamSource(this.mediaStream);
+        const processor = audioContext.createScriptProcessor(1024, 1, 1);
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+
+        processor.onaudioprocess = e => {
+            const inputData = e.inputBuffer.getChannelData(0);
+            const pcmData = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+                pcmData[i] = inputData[i] * 32767;
+            }
+            const base64Data = btoa(String.fromCharCode.apply(null, new Uint8Array(pcmData.buffer)));
+
+            if (window.require) {
+                const { ipcRenderer } = window.require('electron');
+                ipcRenderer.invoke('send-audio-content', { data: base64Data, mimeType: 'audio/pcm;rate=16000' });
+            }
+        };
+
+        const videoTrack = this.mediaStream.getVideoTracks()[0];
+        const imageCapture = new ImageCapture(videoTrack);
+
+        const captureFrame = async () => {
+            if (!this.isRecording) {
+                return;
+            }
+
+            try {
+                const imageBitmap = await imageCapture.grabFrame();
+                const canvas = document.createElement('canvas');
+                canvas.width = imageBitmap.width;
+                canvas.height = imageBitmap.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(imageBitmap, 0, 0);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                const base64Data = dataUrl.split(',')[1];
+
+                if (window.require) {
+                    const { ipcRenderer } = window.require('electron');
+                    ipcRenderer.invoke('send-video-chunk', { data: base64Data });
+                }
+            } catch (error) {
+                console.error('Error capturing frame:', error);
+            }
+
+            setTimeout(captureFrame, 1000); // Capture a frame every second
+        };
+
+        this.isRecording = true;
+        captureFrame();
+    }
+
+    stopRecording() {
+        if (this.mediaStream) {
+            this.mediaStream.getTracks().forEach(track => track.stop());
+        }
+        this.isRecording = false;
+        this.mediaStream = null;
     }
 
     // Help view event handlers
@@ -343,17 +457,11 @@ export class CheatingDaddyApp extends LitElement {
         }
 
         // Only update localStorage when these specific properties change
-        if (changedProperties.has('selectedProfile')) {
-            localStorage.setItem('selectedProfile', this.selectedProfile);
+        if (changedProperties.has('listeningEnabled')) {
+            localStorage.setItem('listeningEnabled', this.listeningEnabled.toString());
         }
         if (changedProperties.has('selectedLanguage')) {
             localStorage.setItem('selectedLanguage', this.selectedLanguage);
-        }
-        if (changedProperties.has('selectedScreenshotInterval')) {
-            localStorage.setItem('selectedScreenshotInterval', this.selectedScreenshotInterval);
-        }
-        if (changedProperties.has('selectedImageQuality')) {
-            localStorage.setItem('selectedImageQuality', this.selectedImageQuality);
         }
         if (changedProperties.has('layoutMode')) {
             this.updateLayoutMode();
@@ -365,7 +473,7 @@ export class CheatingDaddyApp extends LitElement {
 
     renderCurrentView() {
         // Only re-render the view if it hasn't been cached or if critical properties changed
-        const viewKey = `${this.currentView}-${this.selectedProfile}-${this.selectedLanguage}`;
+        const viewKey = `${this.currentView}-${this.listeningEnabled}-${this.selectedLanguage}`;
 
         switch (this.currentView) {
             case 'onboarding':
@@ -385,16 +493,12 @@ export class CheatingDaddyApp extends LitElement {
             case 'customize':
                 return html`
                     <customize-view
-                        .selectedProfile=${this.selectedProfile}
+                        .listeningEnabled=${this.listeningEnabled}
                         .selectedLanguage=${this.selectedLanguage}
-                        .selectedScreenshotInterval=${this.selectedScreenshotInterval}
-                        .selectedImageQuality=${this.selectedImageQuality}
                         .layoutMode=${this.layoutMode}
                         .advancedMode=${this.advancedMode}
-                        .onProfileChange=${profile => this.handleProfileChange(profile)}
+                        .onListeningChange=${listeningEnabled => this.handleListeningChange(listeningEnabled)}
                         .onLanguageChange=${language => this.handleLanguageChange(language)}
-                        .onScreenshotIntervalChange=${interval => this.handleScreenshotIntervalChange(interval)}
-                        .onImageQualityChange=${quality => this.handleImageQualityChange(quality)}
                         .onLayoutModeChange=${layoutMode => this.handleLayoutModeChange(layoutMode)}
                         .onAdvancedModeChange=${advancedMode => this.handleAdvancedModeChange(advancedMode)}
                     ></customize-view>
@@ -414,7 +518,7 @@ export class CheatingDaddyApp extends LitElement {
                     <assistant-view
                         .responses=${this.responses}
                         .currentResponseIndex=${this.currentResponseIndex}
-                        .selectedProfile=${this.selectedProfile}
+                        .listeningEnabled=${this.listeningEnabled}
                         .onSendText=${message => this.handleSendText(message)}
                         @response-index-changed=${this.handleResponseIndexChanged}
                     ></assistant-view>

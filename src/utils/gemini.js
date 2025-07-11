@@ -227,10 +227,10 @@ async function initializeGeminiSession(apiKey, customPrompt = '', profile = 'int
 
     try {
         const session = await client.live.connect({
-            model: 'gemini-live-2.5-flash-preview',
+            model: 'gemini-2.0-flash-live-001',
             callbacks: {
                 onopen: function () {
-                    sendToRenderer('update-status', 'Live session connected');
+                    sendToRenderer('update-status', 'Screen sharing active');
                 },
                 onmessage: function (message) {
                     console.log('----------------', message);
@@ -267,43 +267,34 @@ async function initializeGeminiSession(apiKey, customPrompt = '', profile = 'int
                     }
                 },
                 onerror: function (e) {
-                    console.debug('Error:', e.message);
-
-                    // Check if the error is related to invalid API key
-                    const isApiKeyError =
-                        e.message &&
-                        (e.message.includes('API key not valid') ||
-                            e.message.includes('invalid API key') ||
-                            e.message.includes('authentication failed') ||
-                            e.message.includes('unauthorized'));
-
-                    if (isApiKeyError) {
-                        console.log('Error due to invalid API key - stopping reconnection attempts');
-                        lastSessionParams = null; // Clear session params to prevent reconnection
-                        reconnectionAttempts = maxReconnectionAttempts; // Stop further attempts
-                        sendToRenderer('update-status', 'Error: Invalid API key');
-                        return;
+                    console.error('Gemini Error:', e);
+                    let errorMessage = 'An unknown error occurred.';
+                    if (e.message) {
+                        if (e.message.includes('API key not valid')) {
+                            errorMessage = 'Error: Invalid API key.';
+                            lastSessionParams = null;
+                            reconnectionAttempts = maxReconnectionAttempts;
+                        } else if (e.message.includes('rate limit')) {
+                            errorMessage = 'Error: API rate limit exceeded.';
+                        } else if (e.message.includes('quota')) {
+                            errorMessage = 'Error: API quota exhausted.';
+                        } else {
+                            errorMessage = 'Error: ' + e.message;
+                        }
                     }
-
-                    sendToRenderer('update-status', 'Error: ' + e.message);
+                    sendToRenderer('update-status', errorMessage);
                 },
                 onclose: function (e) {
-                    console.debug('Session closed:', e.reason);
-
-                    // Check if the session closed due to invalid API key
-                    const isApiKeyError =
-                        e.reason &&
-                        (e.reason.includes('API key not valid') ||
-                            e.reason.includes('invalid API key') ||
-                            e.reason.includes('authentication failed') ||
-                            e.reason.includes('unauthorized'));
-
-                    if (isApiKeyError) {
-                        console.log('Session closed due to invalid API key - stopping reconnection attempts');
-                        lastSessionParams = null; // Clear session params to prevent reconnection
-                        reconnectionAttempts = maxReconnectionAttempts; // Stop further attempts
-                        sendToRenderer('update-status', 'Session closed: Invalid API key');
-                        return;
+                    console.log('Gemini session closed:', e);
+                    let closeMessage = 'Session closed.';
+                    if (e.reason) {
+                        if (e.reason.includes('API key not valid')) {
+                            closeMessage = 'Session closed: Invalid API key.';
+                            lastSessionParams = null;
+                            reconnectionAttempts = maxReconnectionAttempts;
+                        } else {
+                            closeMessage = 'Session closed: ' + e.reason;
+                        }
                     }
 
                     // Attempt automatic reconnection for server-side closures
@@ -311,7 +302,7 @@ async function initializeGeminiSession(apiKey, customPrompt = '', profile = 'int
                         console.log('Attempting automatic reconnection...');
                         attemptReconnection();
                     } else {
-                        sendToRenderer('update-status', 'Session closed');
+                        sendToRenderer('update-status', closeMessage);
                     }
                 },
             },
@@ -511,30 +502,22 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         }
     });
 
-    ipcMain.handle('send-image-content', async (event, { data, debug }) => {
+    ipcMain.handle('send-video-chunk', async (event, { data }) => {
         if (!geminiSessionRef.current) return { success: false, error: 'No active Gemini session' };
 
         try {
-            if (!data || typeof data !== 'string') {
-                console.error('Invalid image data received');
-                return { success: false, error: 'Invalid image data' };
+            if (!data) {
+                console.error('Invalid video data received');
+                return { success: false, error: 'Invalid video data' };
             }
 
-            const buffer = Buffer.from(data, 'base64');
-
-            if (buffer.length < 1000) {
-                console.error(`Image buffer too small: ${buffer.length} bytes`);
-                return { success: false, error: 'Image buffer too small' };
-            }
-
-            process.stdout.write('!');
             await geminiSessionRef.current.sendRealtimeInput({
                 media: { data: data, mimeType: 'image/jpeg' },
             });
 
             return { success: true };
         } catch (error) {
-            console.error('Error sending image:', error);
+            console.error('Error sending video chunk:', error);
             return { success: false, error: error.message };
         }
     });
