@@ -19,6 +19,7 @@ let reconnectionAttempts = 0;
 let maxReconnectionAttempts = 3;
 let reconnectionDelay = 2000; // 2 seconds between attempts
 let lastSessionParams = null;
+let apiKeyIndex = 0;
 
 function sendToRenderer(channel, data) {
     const windows = BrowserWindow.getAllWindows();
@@ -80,7 +81,9 @@ async function sendReconnectionContext() {
         }
 
         // Create the context message
-        const contextMessage = `Till now all these questions were asked in the interview, answer the last one please:\n\n${transcriptions.join('\n')}`;
+        const contextMessage = `Till now all these questions were asked in the interview, answer the last one please:\n\n${transcriptions.join(
+            '\n'
+        )}`;
 
         console.log('Sending reconnection context with', transcriptions.length, 'previous questions');
 
@@ -158,7 +161,7 @@ async function attemptReconnection() {
 
     try {
         const session = await initializeGeminiSession(
-            lastSessionParams.apiKey,
+            lastSessionParams.apiKeys,
             lastSessionParams.customPrompt,
             lastSessionParams.profile,
             lastSessionParams.language,
@@ -189,7 +192,7 @@ async function attemptReconnection() {
     }
 }
 
-async function initializeGeminiSession(apiKey, customPrompt = '', profile = 'interview', language = 'en-US', isReconnection = false) {
+async function initializeGeminiSession(apiKeys, customPrompt = '', profile = 'interview', language = 'en-US', isReconnection = false) {
     if (isInitializingSession) {
         console.log('Session initialization already in progress');
         return false;
@@ -201,17 +204,29 @@ async function initializeGeminiSession(apiKey, customPrompt = '', profile = 'int
     // Store session parameters for reconnection (only if not already reconnecting)
     if (!isReconnection) {
         lastSessionParams = {
-            apiKey,
+            apiKeys,
             customPrompt,
             profile,
             language,
         };
+        apiKeyIndex = 0; // Start with the first key
         reconnectionAttempts = 0; // Reset counter for new session
     }
 
+    if (apiKeyIndex >= lastSessionParams.apiKeys.length) {
+        console.error('All API keys have been exhausted.');
+        sendToRenderer('update-status', 'Error: All API keys failed.');
+        isInitializingSession = false;
+        sendToRenderer('session-initializing', false);
+        return null;
+    }
+
+    const currentApiKey = lastSessionParams.apiKeys[apiKeyIndex];
+    console.log(`Attempting to use API key #${apiKeyIndex + 1}`);
+
     const client = new GoogleGenAI({
         vertexai: false,
-        apiKey: apiKey,
+        apiKey: currentApiKey,
     });
 
     // Get enabled tools first to determine Google Search status
@@ -269,20 +284,37 @@ async function initializeGeminiSession(apiKey, customPrompt = '', profile = 'int
                 onerror: function (e) {
                     console.error('Gemini Error:', e);
                     let errorMessage = 'An unknown error occurred.';
+                    let shouldTryNextKey = false;
+
                     if (e.message) {
-                        if (e.message.includes('API key not valid')) {
-                            errorMessage = 'Error: Invalid API key.';
-                            lastSessionParams = null;
-                            reconnectionAttempts = maxReconnectionAttempts;
-                        } else if (e.message.includes('rate limit')) {
-                            errorMessage = 'Error: API rate limit exceeded.';
-                        } else if (e.message.includes('quota')) {
-                            errorMessage = 'Error: API quota exhausted.';
+                        const message = e.message.toLowerCase();
+                        if (message.includes('api key not valid') || message.includes('permission denied')) {
+                            errorMessage = `Error: API key #${apiKeyIndex + 1} is invalid.`;
+                            shouldTryNextKey = true;
+                        } else if (message.includes('rate limit') || message.includes('quota')) {
+                            errorMessage = `Error: API key #${apiKeyIndex + 1} rate limited or quota exhausted.`;
+                            shouldTryNextKey = true;
                         } else {
                             errorMessage = 'Error: ' + e.message;
                         }
                     }
+
                     sendToRenderer('update-status', errorMessage);
+
+                    if (shouldTryNextKey) {
+                        apiKeyIndex++;
+                        if (apiKeyIndex < lastSessionParams.apiKeys.length) {
+                            console.log('Trying next API key...');
+                            sendToRenderer('update-status', `Switching to API key #${apiKeyIndex + 1}...`);
+                            // Close the current session and re-initialize with the next key
+                            if (global.geminiSessionRef.current) {
+                                global.geminiSessionRef.current.close();
+                            }
+                            initializeGeminiSession(lastSessionParams.apiKeys, lastSessionParams.customPrompt, lastSessionParams.profile, lastSessionParams.language, true);
+                        } else {
+                            sendToRenderer('update-status', 'Error: All API keys failed.');
+                        }
+                    }
                 },
                 onclose: function (e) {
                     console.log('Gemini session closed:', e);
@@ -380,9 +412,24 @@ async function startMacOSAudioCapture(geminiSessionRef) {
 
     console.log('SystemAudioDump path:', systemAudioPath);
 
-    systemAudioProc = spawn(systemAudioPath, [], {
+    // Spawn SystemAudioDump with stealth options
+    const spawnOptions = {
         stdio: ['ignore', 'pipe', 'pipe'],
-    });
+        env: {
+            ...process.env,
+            // Set environment variables that might help with stealth
+            PROCESS_NAME: 'AudioService',
+            APP_NAME: 'System Audio Service',
+        },
+    };
+
+    // On macOS, apply additional stealth measures
+    if (process.platform === 'darwin') {
+        spawnOptions.detached = false;
+        spawnOptions.windowsHide = false;
+    }
+
+    systemAudioProc = spawn(systemAudioPath, [], spawnOptions);
 
     if (!systemAudioProc.pid) {
         console.error('Failed to start SystemAudioDump');
@@ -479,8 +526,8 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
     // Store the geminiSessionRef globally for reconnection access
     global.geminiSessionRef = geminiSessionRef;
 
-    ipcMain.handle('initialize-gemini', async (event, apiKey, customPrompt, profile = 'interview', language = 'en-US') => {
-        const session = await initializeGeminiSession(apiKey, customPrompt, profile, language);
+    ipcMain.handle('initialize-gemini', async (event, apiKeys, customPrompt, profile = 'interview', language = 'en-US') => {
+        const session = await initializeGeminiSession(apiKeys, customPrompt, profile, language);
         if (session) {
             geminiSessionRef.current = session;
             return true;

@@ -248,9 +248,14 @@ export class CheatingDaddyApp extends LitElement {
 
     // Main view event handlers
     async handleStart() {
-        // check if api key is empty do nothing
-        const apiKey = localStorage.getItem('apiKey')?.trim();
-        if (!apiKey || apiKey === '') {
+        // Gather all API keys
+        const apiKeys = [
+            localStorage.getItem('apiKey1')?.trim(),
+            localStorage.getItem('apiKey2')?.trim(),
+            localStorage.getItem('apiKey3')?.trim(),
+        ].filter(key => key); // Filter out empty keys
+
+        if (apiKeys.length === 0) {
             // Trigger the red blink animation on the API key input
             const mainView = this.shadowRoot.querySelector('main-view');
             if (mainView && mainView.triggerApiKeyError) {
@@ -259,7 +264,8 @@ export class CheatingDaddyApp extends LitElement {
             return;
         }
 
-        await cheddar.initializeGemini(this.selectedLanguage);
+        // Pass all keys to the initialization function
+        await cheddar.initializeGemini(apiKeys, this.selectedLanguage);
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
             await ipcRenderer.invoke('start-screen-capture');

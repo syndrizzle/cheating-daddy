@@ -17,13 +17,37 @@ export class MainView extends LitElement {
         }
 
         .input-group {
+            position: relative;
             display: flex;
-            gap: 12px;
-            margin-bottom: 20px;
+            align-items: center;
+            margin-bottom: 12px;
         }
 
         .input-group input {
             flex: 1;
+            padding-right: 36px; /* Space for the eye icon */
+        }
+
+        .input-group .eye-icon {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            cursor: pointer;
+            color: var(--description-color);
+            width: 16px;
+            height: 16px;
+        }
+
+        .input-group .eye-icon:hover {
+            color: var(--text-color);
+        }
+
+        .api-keys-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 20px;
         }
 
         input {
@@ -193,11 +217,22 @@ export class MainView extends LitElement {
         }
     }
 
-    handleInput(e) {
-        localStorage.setItem('apiKey', e.target.value);
+    handleInput(e, keyIndex) {
+        const keyName = `apiKey${keyIndex}`;
+        localStorage.setItem(keyName, e.target.value);
         // Clear error state when user starts typing
         if (this.showApiKeyError) {
             this.showApiKeyError = false;
+        }
+        this.requestUpdate();
+    }
+
+    togglePasswordVisibility(e) {
+        const input = e.currentTarget.previousElementSibling;
+        if (input.type === 'password') {
+            input.type = 'text';
+        } else {
+            input.type = 'password';
         }
     }
 
@@ -282,24 +317,57 @@ export class MainView extends LitElement {
     }
 
     render() {
+        const eyeIcon = html`
+            <svg class="eye-icon" @click=${this.togglePasswordVisibility} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M1 12C1 12 5 20 12 20C19 20 23 12 23 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        `;
+
         return html`
             <div class="welcome">Welcome</div>
 
+            <div class="api-keys-container">
+                <div class="input-group">
+                    <input
+                        type="password"
+                        placeholder="Enter your Gemini API Key 1 (Primary)"
+                        .value=${localStorage.getItem('apiKey1') || ''}
+                        @input=${e => this.handleInput(e, 1)}
+                        class="${this.showApiKeyError ? 'api-key-error' : ''}"
+                    />
+                    ${eyeIcon}
+                </div>
+                <div class="input-group">
+                    <input
+                        type="password"
+                        placeholder="Enter your Gemini API Key 2 (Optional Fallback)"
+                        .value=${localStorage.getItem('apiKey2') || ''}
+                        @input=${e => this.handleInput(e, 2)}
+                    />
+                    ${eyeIcon}
+                </div>
+                <div class="input-group">
+                    <input
+                        type="password"
+                        placeholder="Enter your Gemini API Key 3 (Optional Fallback)"
+                        .value=${localStorage.getItem('apiKey3') || ''}
+                        @input=${e => this.handleInput(e, 3)}
+                    />
+                    ${eyeIcon}
+                </div>
+            </div>
+
             <div class="input-group">
-                <input
-                    type="password"
-                    placeholder="Enter your Gemini API Key"
-                    .value=${localStorage.getItem('apiKey') || ''}
-                    @input=${this.handleInput}
-                    class="${this.showApiKeyError ? 'api-key-error' : ''}"
-                />
-                <button @click=${this.handleStartClick} class="start-button ${this.isInitializing ? 'initializing' : ''}">
+                 <button @click=${this.handleStartClick} class="start-button ${this.isInitializing ? 'initializing' : ''}" style="width: 100%;">
                     ${this.getStartButtonText()}
                 </button>
             </div>
+
             <p class="description">
-                dont have an api key?
-                <span @click=${this.handleAPIKeyHelpClick} class="link">get one here</span>
+                Don't have an API key?
+                <span @click=${this.handleAPIKeyHelpClick} class="link">Get one here</span>
             </p>
         `;
     }

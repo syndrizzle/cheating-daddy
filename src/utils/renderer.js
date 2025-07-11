@@ -1,6 +1,21 @@
 // renderer.js
 const { ipcRenderer } = require('electron');
 
+// Initialize random display name for UI components
+window.randomDisplayName = null;
+
+// Request random display name from main process
+ipcRenderer
+    .invoke('get-random-display-name')
+    .then(name => {
+        window.randomDisplayName = name;
+        console.log('Set random display name:', name);
+    })
+    .catch(err => {
+        console.warn('Could not get random display name:', err);
+        window.randomDisplayName = 'System Monitor';
+    });
+
 let mediaStream = null;
 let screenshotInterval = null;
 let audioContext = null;
@@ -136,22 +151,21 @@ function arrayBufferToBase64(buffer) {
     return btoa(binary);
 }
 
-async function initializeGemini(profile = 'interview', language = 'en-US') {
-    const apiKey = localStorage.getItem('apiKey')?.trim();
-    if (apiKey) {
-        const success = await ipcRenderer.invoke('initialize-gemini', apiKey, localStorage.getItem('customPrompt') || '', profile, language);
-                  if (success) {
-              cheddar.setStatus('Live');
-          } else {
-              cheddar.setStatus('error');
-          }
+async function initializeGemini(apiKeys, language = 'en-US') {
+    if (apiKeys && apiKeys.length > 0) {
+        const success = await ipcRenderer.invoke('initialize-gemini', apiKeys, localStorage.getItem('customPrompt') || '', 'interview', language);
+        if (success) {
+            cheddar.setStatus('Live');
+        } else {
+            cheddar.setStatus('error');
+        }
     }
 }
 
 // Listen for status updates
 ipcRenderer.on('update-status', (event, status) => {
     console.log('Status update:', status);
-                    cheddar.setStatus(status);
+    cheddar.setStatus(status);
 });
 
 // Listen for responses - REMOVED: This is handled in CheatingDaddyApp.js to avoid duplicates
@@ -268,7 +282,7 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
         }
     } catch (err) {
         console.error('Error starting capture:', err);
-                            cheddar.setStatus('error');
+        cheddar.setStatus('error');
     }
 }
 
@@ -626,33 +640,33 @@ const cheddar = {
     // Element access
     element: () => cheatingDaddyApp,
     e: () => cheatingDaddyApp,
-    
+
     // App state functions - access properties directly from the app element
     getCurrentView: () => cheatingDaddyApp.currentView,
     getLayoutMode: () => cheatingDaddyApp.layoutMode,
-    
+
     // Status and response functions
-    setStatus: (text) => cheatingDaddyApp.setStatus(text),
-    setResponse: (response) => cheatingDaddyApp.setResponse(response),
-    
+    setStatus: text => cheatingDaddyApp.setStatus(text),
+    setResponse: response => cheatingDaddyApp.setResponse(response),
+
     // Core functionality
     initializeGemini,
     startCapture,
     stopCapture,
     sendTextMessage,
     handleShortcut,
-    
+
     // Conversation history functions
     getAllConversationSessions,
     getConversationSession,
     initConversationStorage,
-    
+
     // Content protection function
     getContentProtection: () => {
         const contentProtection = localStorage.getItem('contentProtection');
         return contentProtection !== null ? contentProtection === 'true' : true;
     },
-    
+
     // Platform detection
     isLinux: isLinux,
     isMacOS: isMacOS,
